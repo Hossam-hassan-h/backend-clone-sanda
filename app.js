@@ -21,7 +21,7 @@ import { AppError } from './src/middlewares/appError.js';
 
 const app = express();
 
-app.use(cors({ origin: ["http://localhost:8080", "http://127.0.0.1:8080"], credentials: true }));
+app.use(cors({ origin: ["http://localhost:8080", "https://sanda-ten.vercel.app", "http://127.0.0.1:8080"], credentials: true }));
 app.post('/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
 app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(express.json());
