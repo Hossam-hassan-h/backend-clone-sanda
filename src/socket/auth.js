@@ -1,7 +1,9 @@
 import { verifyAccessToken } from "../utils/jwt.js";
 
 export const authenticateSocket = (socket, next) => {
-  const token = socket.handshake.auth?.token;
+  const authToken = socket.handshake.auth?.token;
+  const headerToken = socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
+  const token = authToken || headerToken;
 
   if (!token || typeof token !== "string") {
     return next(new Error("Unauthorized"));

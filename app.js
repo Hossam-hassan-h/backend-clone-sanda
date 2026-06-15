@@ -20,7 +20,24 @@ import { AppError } from './src/middlewares/appError.js';
 
 const app = express();
 
-app.use(cors({ origin: ["http://localhost:8080", "https://sanda-ten.vercel.app", "http://127.0.0.1:8080"], credentials: true }));
+app.set("trust proxy", 1);
+
+const allowedOrigins = [
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://sanda-ten.vercel.app",
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []),
+].map((origin) => origin.trim()).filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new AppError("Not allowed by CORS", 403, statusText.FAIL));
+  },
+  credentials: true,
+}));
 app.post('/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
 app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(express.json());

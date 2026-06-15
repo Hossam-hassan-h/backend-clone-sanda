@@ -68,9 +68,17 @@ const jobAssignmentSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    check_in_location: {
+      lat: Number,
+      lng: Number,
+    },
     checked_out_at: {
       type: Date,
       default: null,
+    },
+    check_out_location: {
+      lat: Number,
+      lng: Number,
     },
     completed_at: {
       type: Date,

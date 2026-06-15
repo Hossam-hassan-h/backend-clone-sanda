@@ -98,6 +98,42 @@ export const unverifyUser = catchError(async (req, res) => {
   });
 });
 
+export const suspendWorker = catchError(async (req, res) => {
+  const user = await adminService.suspendWorker(req.params.id, req.body, req.user.userId);
+
+  res.json({
+    status: statusText.SUCCESS,
+    data: user,
+  });
+});
+
+export const blockWorker = catchError(async (req, res) => {
+  const user = await adminService.blockWorker(req.params.id, req.body, req.user.userId);
+
+  res.json({
+    status: statusText.SUCCESS,
+    data: user,
+  });
+});
+
+export const restoreWorker = catchError(async (req, res) => {
+  const user = await adminService.restoreWorker(req.params.id, req.body, req.user.userId);
+
+  res.json({
+    status: statusText.SUCCESS,
+    data: user,
+  });
+});
+
+export const getUserLogs = catchError(async (req, res) => {
+  const logs = await adminService.getUserLogs(req.query);
+
+  res.json({
+    status: statusText.SUCCESS,
+    data: logs,
+  });
+});
+
 // ─── Jobs ───
 
 export const getAllJobs = catchError(async (req, res) => {
@@ -205,6 +241,15 @@ export const getReportById = catchError(async (req, res) => {
 
 export const updateReportStatus = catchError(async (req, res) => {
   const report = await adminService.updateReportStatus(req.params.id, req.body.status);
+
+  res.json({
+    status: statusText.SUCCESS,
+    data: report,
+  });
+});
+
+export const reviewReport = catchError(async (req, res) => {
+  const report = await adminService.reviewReport(req.params.id, req.body, req.user.userId);
 
   res.json({
     status: statusText.SUCCESS,

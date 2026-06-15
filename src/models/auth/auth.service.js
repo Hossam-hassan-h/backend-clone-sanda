@@ -153,7 +153,11 @@ export const forgotPassword = async (email) => {
   );
 
   if (remainingMs > 0) {
-    throw new AppError("Too many requests. Try again later.", 429, statusText.FAIL);
+    throw new AppError(
+      `Please wait ${Math.ceil(remainingMs / 1000)} seconds before requesting another OTP`,
+      429,
+      statusText.FAIL
+    );
   }
 
   const otp = generatePasswordResetOtp();
@@ -180,7 +184,7 @@ export const forgotPassword = async (email) => {
   );
 
   if (!updatedUser) {
-    throw new AppError("Too many requests. Try again later.", 429, statusText.FAIL);
+    throw new AppError("Please wait before requesting another OTP", 429, statusText.FAIL);
   }
 
   otpRateLimitStore.set(normalizedEmail, now.getTime());

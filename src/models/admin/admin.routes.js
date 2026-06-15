@@ -5,6 +5,7 @@ import allowTo from "../../middlewares/allowTo.js";
 import {
   AdminUserIdParamsSchema,
   AdminUserUpdateSchema,
+  AdminWorkerModerationSchema,
   AdminUsersQuerySchema,
   AdminJobIdParamsSchema,
   AdminJobUpdateSchema,
@@ -13,7 +14,9 @@ import {
   AdminChatQuerySchema,
   AdminReportIdParamsSchema,
   AdminReportUpdateStatusSchema,
+  AdminReportReviewSchema,
   AdminReportsQuerySchema,
+  AdminUserLogsQuerySchema,
 } from "./admin.validation.js";
 import {
   getAllUsers,
@@ -24,6 +27,10 @@ import {
   unbanUser,
   verifyUser,
   unverifyUser,
+  suspendWorker,
+  blockWorker,
+  restoreWorker,
+  getUserLogs,
   getAllJobs,
   getJobById,
   updateJob,
@@ -33,6 +40,7 @@ import {
   getAllReports,
   getReportById,
   updateReportStatus,
+  reviewReport,
   deleteReport,
 } from "./admin.controller.js";
 
@@ -63,6 +71,14 @@ adminRoutes.patch("/users/:id/unban", validate(AdminUserIdParamsSchema, "params"
 adminRoutes.patch("/users/:id/verify", validate(AdminUserIdParamsSchema, "params"), verifyUser);
 
 adminRoutes.patch("/users/:id/unverify", validate(AdminUserIdParamsSchema, "params"), unverifyUser);
+
+adminRoutes.patch("/users/:id/suspend", validate(AdminUserIdParamsSchema, "params"), validate(AdminWorkerModerationSchema), suspendWorker);
+
+adminRoutes.patch("/users/:id/block", validate(AdminUserIdParamsSchema, "params"), validate(AdminWorkerModerationSchema), blockWorker);
+
+adminRoutes.patch("/users/:id/restore", validate(AdminUserIdParamsSchema, "params"), validate(AdminWorkerModerationSchema), restoreWorker);
+
+adminRoutes.get("/user-logs", validate(AdminUserLogsQuerySchema, "query"), getUserLogs);
 
 // ─── Jobs ───
 
@@ -104,6 +120,13 @@ adminRoutes.patch(
   validate(AdminReportIdParamsSchema, "params"),
   validate(AdminReportUpdateStatusSchema),
   updateReportStatus
+);
+
+adminRoutes.patch(
+  "/reports/:id/review",
+  validate(AdminReportIdParamsSchema, "params"),
+  validate(AdminReportReviewSchema),
+  reviewReport
 );
 
 adminRoutes.delete(

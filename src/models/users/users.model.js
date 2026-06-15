@@ -87,6 +87,23 @@ const userSchema = new mongoose.Schema(
       default: "none",
     },
 
+    worker_state: {
+      type: String,
+      enum: ["AVAILABLE", "ASSIGNED", "ACTIVE_ON_JOB", "COMPLETED", "SUSPENDED", "BLOCKED"],
+      default: "AVAILABLE",
+    },
+
+    suspension_until: {
+      type: Date,
+      default: null,
+    },
+
+    admin_notes: {
+      type: String,
+      default: "",
+      maxlength: 1000,
+    },
+
     confirmedMail: {
       type: Boolean,
       default: false,
@@ -99,6 +116,12 @@ const userSchema = new mongoose.Schema(
     },
 
     emailOtpExpire: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
+    emailOtpLastSentAt: {
       type: Date,
       default: null,
       select: false,

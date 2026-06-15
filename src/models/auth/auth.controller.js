@@ -54,6 +54,16 @@ export const verifyEmail = catchError(async (req, res) => {
   });
 });
 
+export const resendEmailOtp = catchError(async (req, res) => {
+  const { email } = req.body;
+  const result = await userService.resendEmailOtp(email);
+
+  res.json({
+    status: statusText.SUCCESS,
+    data: result,
+  });
+});
+
 export const forgotPassword = catchError(async (req, res) => {
   const { email } = req.body;
   const result = await authService.forgotPassword(email);

@@ -26,6 +26,11 @@ export const AdminUserUpdateSchema = z.object({
   skills: z.array(z.string()).optional(),
 }).strict();
 
+export const AdminWorkerModerationSchema = z.object({
+  reason: z.string().trim().max(1000).optional(),
+  suspension_until: z.coerce.date().nullable().optional(),
+}).strict();
+
 export const AdminUserCreateSchema = z.object({
   name: z.string().trim().min(1).max(100),
   email: z.string().email(),
@@ -61,6 +66,11 @@ export const AdminReportIdParamsSchema = z.object({ id: objectId }).strict();
 
 export const AdminReportUpdateStatusSchema = z.object({
   status: z.enum(["open", "reviewed", "closed"]),
+}).strict();
+
+export const AdminReportReviewSchema = z.object({
+  decision: z.enum(["approved", "rejected"]),
+  admin_notes: z.string().trim().max(1000).optional(),
 }).strict();
 
 export const AdminReportsQuerySchema = PaginationQuerySchema.extend({

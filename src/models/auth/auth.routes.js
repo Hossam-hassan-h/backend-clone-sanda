@@ -6,6 +6,7 @@ import {
   RefreshTokenSchema,
   ChangePasswordSchema,
   VerifyEmailSchema,
+  ResendEmailOtpSchema,
   ForgotPasswordSchema,
   ResetPasswordSchema,
 } from "./auth.validation.js";
@@ -18,6 +19,7 @@ authRoutes.post("/refresh", validate(RefreshTokenSchema), authController.refresh
 authRoutes.post("/logout", verifyAccess, authController.logout);
 authRoutes.put("/change-password", verifyAccess, validate(ChangePasswordSchema), authController.changePassword);
 authRoutes.post("/verify-email", validate(VerifyEmailSchema), authController.verifyEmail);
+authRoutes.post("/resend-email-otp", validate(ResendEmailOtpSchema), authController.resendEmailOtp);
 authRoutes.post("/forgot-password", validate(ForgotPasswordSchema), authController.forgotPassword);
 authRoutes.post("/reset-password", validate(ResetPasswordSchema), authController.resetPassword);
 

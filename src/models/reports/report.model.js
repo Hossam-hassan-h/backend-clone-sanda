@@ -28,6 +28,25 @@ const reportSchema = new mongoose.Schema(
       ref: "Job",
       default: null,
     },
+    review_decision: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    admin_notes: {
+      type: String,
+      default: "",
+      maxlength: 1000,
+    },
+    reviewed_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    reviewed_at: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

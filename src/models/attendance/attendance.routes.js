@@ -4,6 +4,8 @@ import verifyAccess from "../../middlewares/verifyAccess.js";
 import allowTo from "../../middlewares/allowTo.js";
 import {
   AttendanceAssignmentIdParamsSchema,
+  AttendanceAdminAnalyticsQuerySchema,
+  AttendanceReportQuerySchema,
   GenerateAttendanceTokenSchema,
   ScanAttendanceTokenSchema,
 } from "./attendance.validation.js";
@@ -12,9 +14,27 @@ import {
   generateCheckOutToken,
   checkInAssignment,
   checkOutAssignment,
+  getAdminAttendanceAnalytics,
+  getEmployerAttendanceReport,
 } from "./attendance.controller.js";
 
 const attendanceRoutes = express.Router();
+
+attendanceRoutes.get(
+  "/attendance/reports/employer",
+  verifyAccess,
+  allowTo("employer"),
+  validate(AttendanceReportQuerySchema, "query"),
+  getEmployerAttendanceReport
+);
+
+attendanceRoutes.get(
+  "/attendance/admin/analytics",
+  verifyAccess,
+  allowTo("admin"),
+  validate(AttendanceAdminAnalyticsQuerySchema, "query"),
+  getAdminAttendanceAnalytics
+);
 
 attendanceRoutes.post(
   "/job-assignments/:id/check-in-qr",

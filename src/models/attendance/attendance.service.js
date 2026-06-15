@@ -17,6 +17,9 @@ const SAFE_WORKER_FIELDS = "name role profile_image bio";
 const SAFE_EMPLOYER_FIELDS = "name role profile_image bio";
 const SAFE_JOB_FIELDS =
   "title category location status start_date end_date salary";
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 100;
 
 const generateRawToken = () => crypto.randomBytes(32).toString("base64url");
 const hashToken = (token) =>
@@ -24,6 +27,27 @@ const hashToken = (token) =>
 const getExpiryDate = () =>
   new Date(Date.now() + TOKEN_TTL_MINUTES * 60 * 1000);
 const isDuplicateKeyError = (error) => error?.code === 11000;
+
+const buildPagination = (query = {}) => {
+  const page = Math.max(Number(query.page) || DEFAULT_PAGE, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+const createPaginationMeta = ({ page, limit }, total) => ({
+  page,
+  limit,
+  total,
+  totalPages: Math.max(1, Math.ceil(total / limit)),
+});
+
+const normalizeStatusFilter = (status) => {
+  if (!status) return undefined;
+  if (status === "checked-in") return "in_progress";
+  if (status === "checked-out") return "completed";
+  if (status === "no-show") return "cancelled";
+  return status;
+};
 
 const assertAssignmentExists = (assignment) => {
   if (!assignment) {
@@ -70,7 +94,7 @@ const getPopulatedAssignment = async (assignmentId, session = null) => {
   const query = JobAssignment.findById(assignmentId)
     .populate("job", "_id owner status")
     .select(
-      "_id job worker employer status checked_in_at checked_out_at started_at completed_at"
+      "_id job worker employer status checked_in_at checked_out_at started_at completed_at check_in_location check_out_location"
     );
 
   if (session) {
@@ -87,6 +111,144 @@ const formatAssignmentResponse = async (assignmentId) =>
     .populate("employer", SAFE_EMPLOYER_FIELDS)
     .select("-__v -attendance_token_generation_locks")
     .lean();
+
+const getAttendanceStatus = (assignment) => {
+  if (assignment.checked_out_at) return "checked_out";
+  if (assignment.checked_in_at) return "checked_in";
+  return "none";
+};
+
+const getWorkedHours = (assignment) => {
+  if (!assignment.checked_in_at || !assignment.checked_out_at) return null;
+  return Math.max(
+    0,
+    (new Date(assignment.checked_out_at).getTime() -
+      new Date(assignment.checked_in_at).getTime()) /
+      3600000
+  );
+};
+
+const serializeAttendanceAssignment = (assignment) => {
+  const job = assignment.job || {};
+  const worker = assignment.worker || {};
+  return {
+    id: assignment._id?.toString(),
+    jobId: job._id?.toString() || assignment.job?.toString(),
+    job: {
+      id: job._id?.toString(),
+      title: job.title,
+      city: job.location,
+      price: job.salary,
+      status: job.status,
+    },
+    workerId: worker._id?.toString() || assignment.worker?.toString(),
+    worker: {
+      id: worker._id?.toString(),
+      name: worker.name,
+      avatar: worker.profile_image?.url,
+      rating: worker.rating,
+    },
+    employerId: assignment.employer?._id?.toString() || assignment.employer?.toString(),
+    status: assignment.status,
+    checkInTime: assignment.checked_in_at,
+    checkOutTime: assignment.checked_out_at,
+    checkedInAt: assignment.checked_in_at,
+    checkedOutAt: assignment.checked_out_at,
+    completedAt: assignment.completed_at,
+    marketplaceStatus: assignment.marketplace_status,
+    payment: assignment.payment,
+    attendanceStatus: getAttendanceStatus(assignment),
+    workedHours: getWorkedHours(assignment),
+    checkInLocation: assignment.check_in_location || null,
+    checkOutLocation: assignment.check_out_location || null,
+    createdAt: assignment.createdAt,
+  };
+};
+
+const buildAttendanceFilter = (baseFilter, query = {}) => {
+  const filter = { ...baseFilter };
+  const status = normalizeStatusFilter(query.status);
+  if (status) filter.status = status;
+  if (query.jobId) filter.job = query.jobId;
+  if (query.fromDate || query.toDate) {
+    filter.createdAt = {};
+    if (query.fromDate) filter.createdAt.$gte = new Date(query.fromDate);
+    if (query.toDate) filter.createdAt.$lte = new Date(query.toDate);
+  }
+  return filter;
+};
+
+export const getEmployerAttendanceReport = async (employerId, query = {}) => {
+  const pagination = buildPagination(query);
+  const filter = buildAttendanceFilter({ employer: employerId }, query);
+
+  let workerIds = null;
+  if (query.workerName) {
+    const User = (await import("../users/users.model.js")).default;
+    const workers = await User.find({
+      name: { $regex: query.workerName, $options: "i" },
+      role: "worker",
+    }).select("_id");
+    workerIds = workers.map((worker) => worker._id);
+    filter.worker = { $in: workerIds };
+  }
+
+  const [assignments, total] = await Promise.all([
+    JobAssignment.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(pagination.skip)
+      .limit(pagination.limit)
+      .populate("job", SAFE_JOB_FIELDS)
+      .populate("worker", SAFE_WORKER_FIELDS)
+      .populate("employer", SAFE_EMPLOYER_FIELDS)
+      .select("-__v -attendance_token_generation_locks")
+      .lean(),
+    JobAssignment.countDocuments(filter),
+  ]);
+
+  return {
+    data: assignments.map(serializeAttendanceAssignment),
+    pagination: createPaginationMeta(pagination, total),
+  };
+};
+
+export const getAdminAttendanceAnalytics = async (query = {}) => {
+  const pagination = buildPagination(query);
+  const filter = buildAttendanceFilter({}, query);
+
+  const [assignments, total, allForAnalytics] = await Promise.all([
+    JobAssignment.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(pagination.skip)
+      .limit(pagination.limit)
+      .populate("job", SAFE_JOB_FIELDS)
+      .populate("worker", SAFE_WORKER_FIELDS)
+      .populate("employer", SAFE_EMPLOYER_FIELDS)
+      .select("-__v -attendance_token_generation_locks")
+      .lean(),
+    JobAssignment.countDocuments(filter),
+    JobAssignment.find(filter).select("checked_in_at checked_out_at status").lean(),
+  ]);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const workedHours = allForAnalytics
+    .map(getWorkedHours)
+    .filter((hours) => hours != null);
+  const totalWorkedHours = workedHours.reduce((sum, hours) => sum + hours, 0);
+
+  return {
+    analytics: {
+      totalAssignments: total,
+      todayCheckIns: allForAnalytics.filter((item) => item.checked_in_at && item.checked_in_at >= today).length,
+      activeShifts: allForAnalytics.filter((item) => item.checked_in_at && !item.checked_out_at).length,
+      avgWorkedHours: workedHours.length ? totalWorkedHours / workedHours.length : 0,
+      totalWorkedHours,
+    },
+    data: assignments.map(serializeAttendanceAssignment),
+    pagination: createPaginationMeta(pagination, total),
+  };
+};
 
 const assertAssignmentStatusForToken = (assignment, type) => {
   if (type === "check_in") {
@@ -329,7 +491,12 @@ export const generateCheckOutToken = async (
 ) =>
   await generateAttendanceToken(assignmentId, employerId, "check_out", options);
 
-export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
+const normalizeLocation = (location) =>
+  location && Number.isFinite(location.lat) && Number.isFinite(location.lng)
+    ? { lat: location.lat, lng: location.lng }
+    : undefined;
+
+export const checkInAssignment = async (assignmentId, workerId, qrToken, location) => {
   const session = await mongoose.startSession();
 
   try {
@@ -371,6 +538,14 @@ export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
       });
 
       const now = new Date();
+      const update = {
+        status: "in_progress",
+        checked_in_at: now,
+        started_at: now,
+      };
+      const safeLocation = normalizeLocation(location);
+      if (safeLocation) update.check_in_location = safeLocation;
+
       const updatedAssignment = await JobAssignment.findOneAndUpdate(
         {
           _id: assignmentId,
@@ -378,11 +553,7 @@ export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
           status: "assigned",
           checked_in_at: null,
         },
-        {
-          status: "in_progress",
-          checked_in_at: now,
-          started_at: now,
-        },
+        update,
         {
           new: true,
           runValidators: true,
@@ -426,7 +597,7 @@ export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
   }
 };
 
-export const checkOutAssignment = async (assignmentId, workerId, qrToken) => {
+export const checkOutAssignment = async (assignmentId, workerId, qrToken, location) => {
   const session = await mongoose.startSession();
 
   try {
@@ -475,6 +646,10 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken) => {
         session,
       });
 
+      const update = { checked_out_at: new Date() };
+      const safeLocation = normalizeLocation(location);
+      if (safeLocation) update.check_out_location = safeLocation;
+
       const updatedAssignment = await JobAssignment.findOneAndUpdate(
         {
           _id: assignmentId,
@@ -482,9 +657,7 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken) => {
           status: "in_progress",
           checked_out_at: null,
         },
-        {
-          checked_out_at: new Date(),
-        },
+        update,
         {
           new: true,
           runValidators: true,
