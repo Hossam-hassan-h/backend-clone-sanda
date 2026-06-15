@@ -21,6 +21,7 @@ export const AdminUserUpdateSchema = z.object({
   phone: z.string().max(13).optional(),
   role: z.enum(["worker", "employer", "admin"]).optional(),
   is_active: z.boolean().optional(),
+  isBlocked: z.boolean().optional(),
   bio: z.string().max(500).optional(),
   city: z.string().trim().optional(),
   skills: z.array(z.string()).optional(),

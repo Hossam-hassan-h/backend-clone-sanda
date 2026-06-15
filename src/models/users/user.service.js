@@ -86,6 +86,8 @@ export const register = async (userData) => {
     ...userData,
     email: normalizedEmail,
     password: hashedPassword,
+    is_active: true,
+    isBlocked: false,
     confirmedMail: false,
     emailOtp: hashedOtp,
     emailOtpExpire: expiresAt,

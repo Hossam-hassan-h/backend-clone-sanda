@@ -35,6 +35,9 @@ const getRateLimitRemainingMs = (email, lastSentAt = null) => {
   return Math.max(0, remaining);
 };
 
+const isAccountBlocked = (user) =>
+  user?.isBlocked === true || user?.worker_state === "BLOCKED";
+
 
 export const login = async (email, password) => {
   const user = await User.findOne({ email: normalizeEmail(email) }).select("+password");
@@ -51,7 +54,7 @@ export const login = async (email, password) => {
     throw new AppError("Please verify your email before logging in.", 403, statusText.FAIL);
   }
 
-  if (user.is_active === false || user.worker_state === "BLOCKED") {
+  if (isAccountBlocked(user)) {
     throw new AppError("Your account is blocked. Please contact support.", 403, statusText.FAIL);
   }
 
@@ -90,6 +93,10 @@ export const refreshToken = async (refreshToken) => {
   const user = await User.findById(userId);
   if (!user) {
     throw new AppError("User not found", 404, statusText.FAIL);
+  }
+
+  if (isAccountBlocked(user)) {
+    throw new AppError("Your account is blocked. Please contact support.", 403, statusText.FAIL);
   }
 
   const newAccessToken = generateAccessToken(user._id, user.role);

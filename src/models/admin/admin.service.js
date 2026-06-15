@@ -83,7 +83,7 @@ export const deleteUser = async (userId) => {
 export const banUser = async (userId) => {
   const user = await User.findByIdAndUpdate(
     userId,
-    { is_active: false },
+    { isBlocked: true },
     { new: true }
   ).select("-password -__v");
 
@@ -94,7 +94,7 @@ export const banUser = async (userId) => {
 export const unbanUser = async (userId) => {
   const user = await User.findByIdAndUpdate(
     userId,
-    { is_active: true },
+    { isBlocked: false },
     { new: true }
   ).select("-password -__v");
 
@@ -145,7 +145,7 @@ export const suspendWorker = async (userId, { reason, suspension_until } = {}, a
       worker_state: "SUSPENDED",
       suspension_until: suspension_until ?? null,
       admin_notes: reason ?? "",
-      is_active: true,
+      isBlocked: false,
     },
     { new: true, runValidators: true }
   ).select("-password -__v");
@@ -162,7 +162,7 @@ export const blockWorker = async (userId, { reason } = {}, adminId = null) => {
       worker_state: "BLOCKED",
       suspension_until: null,
       admin_notes: reason ?? "",
-      is_active: false,
+      isBlocked: true,
     },
     { new: true, runValidators: true }
   ).select("-password -__v");
@@ -179,7 +179,7 @@ export const restoreWorker = async (userId, { reason } = {}, adminId = null) => 
       worker_state: "AVAILABLE",
       suspension_until: null,
       admin_notes: reason ?? "",
-      is_active: true,
+      isBlocked: false,
     },
     { new: true, runValidators: true }
   ).select("-password -__v");

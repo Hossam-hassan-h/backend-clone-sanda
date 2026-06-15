@@ -45,19 +45,13 @@ export const userValidationSchema = z.object({
   city: z.string().max(200).optional().default(""),
 
   skills: z.array(z.string()).optional().default([]),
-
-  is_active: z
-    .boolean()
-    .optional()
-    .default(true),
-});
+}).strict();
 
 export const updateProfileSchema = userValidationSchema
   .omit({
     email: true,
     password: true,
     role: true,
-    is_active: true,
   })
   .partial()
   .strict();

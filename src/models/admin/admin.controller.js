@@ -12,8 +12,8 @@ export const getAllUsers = catchError(async (req, res) => {
   const { page, pageSize, search, role, status: userStatus } = req.query;
   const filter = {};
   if (role) filter.role = role;
-  if (userStatus === "active") filter.is_active = { $ne: false };
-  if (userStatus === "banned") filter.is_active = false;
+  if (userStatus === "active") filter.isBlocked = { $ne: true };
+  if (userStatus === "banned") filter.isBlocked = true;
   if (userStatus === "verified") filter.is_verified = true;
   if (userStatus === "unverified") filter.is_verified = { $ne: true };
   if (userStatus === "pending_verification") filter.verification_status = "pending";
