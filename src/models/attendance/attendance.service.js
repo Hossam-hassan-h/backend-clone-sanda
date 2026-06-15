@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import AttendanceToken from "./attendanceToken.model.js";
 import JobAssignment from "../jobAssignments/jobAssignment.model.js";
@@ -7,6 +8,7 @@ import {
   createNotificationPersistenceError,
   isUnexpectedDuplicateKeyError,
 } from "../notifications/notification.service.js";
+import Job from "../jobs/job.model.js";
 import { AppError } from "../../middlewares/appError.js";
 import statusText from "../../utils/statusText.js";
 
@@ -17,6 +19,7 @@ const SAFE_WORKER_FIELDS = "name role profile_image bio";
 const SAFE_EMPLOYER_FIELDS = "name role profile_image bio";
 const SAFE_JOB_FIELDS =
   "title category location status start_date end_date salary";
+const QR_JWT_SECRET = process.env.JWT_QR_SECRET || process.env.JWT_ACCESS_SECRET;
 
 const generateRawToken = () => crypto.randomBytes(32).toString("base64url");
 const hashToken = (token) =>
@@ -24,6 +27,15 @@ const hashToken = (token) =>
 const getExpiryDate = () =>
   new Date(Date.now() + TOKEN_TTL_MINUTES * 60 * 1000);
 const isDuplicateKeyError = (error) => error?.code === 11000;
+
+const signQRToken = (rawToken, assignmentId, type) =>
+  jwt.sign(
+    { token: rawToken, assignmentId, type },
+    QR_JWT_SECRET,
+    { expiresIn: `${TOKEN_TTL_MINUTES}m` }
+  );
+
+const verifyQRToken = (qrToken) => jwt.verify(qrToken, QR_JWT_SECRET);
 
 const assertAssignmentExists = (assignment) => {
   if (!assignment) {
@@ -240,8 +252,10 @@ const generateAttendanceToken = async (
       throw error;
     }
 
+    const signedToken = signQRToken(rawToken, assignmentId.toString(), type);
+
     return {
-      qrToken: rawToken,
+      qrToken: signedToken,
       type,
       expiresAt,
     };
@@ -256,7 +270,26 @@ const consumeAttendanceToken = async ({
   expectedType,
   session,
 }) => {
-  const tokenHash = hashToken(qrToken);
+  let rawToken;
+  try {
+    const decoded = verifyQRToken(qrToken);
+    rawToken = decoded.token;
+
+    if (decoded.assignmentId !== assignment._id.toString()) {
+      throw new AppError("Attendance token mismatch", 400, statusText.FAIL);
+    }
+    if (decoded.type !== expectedType) {
+      throw new AppError("Attendance token type mismatch", 400, statusText.FAIL);
+    }
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    if (error.name === "TokenExpiredError") {
+      throw new AppError("Attendance token expired", 410, statusText.FAIL);
+    }
+    throw new AppError("Invalid attendance token", 400, statusText.FAIL);
+  }
+
+  const tokenHash = hashToken(rawToken);
   const token = await AttendanceToken.findOne({ tokenHash }).session(session);
 
   if (!token) {
@@ -329,7 +362,7 @@ export const generateCheckOutToken = async (
 ) =>
   await generateAttendanceToken(assignmentId, employerId, "check_out", options);
 
-export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
+export const checkInAssignment = async (assignmentId, workerId, qrToken, location = null) => {
   const session = await mongoose.startSession();
 
   try {
@@ -371,6 +404,20 @@ export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
       });
 
       const now = new Date();
+      const updateFields = {
+        status: "in_progress",
+        checked_in_at: now,
+        started_at: now,
+        attendance_status: "checked_in",
+      };
+
+      if (location && location.lat != null && location.lng != null) {
+        updateFields.check_in_location = {
+          lat: location.lat,
+          lng: location.lng,
+        };
+      }
+
       const updatedAssignment = await JobAssignment.findOneAndUpdate(
         {
           _id: assignmentId,
@@ -378,11 +425,7 @@ export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
           status: "assigned",
           checked_in_at: null,
         },
-        {
-          status: "in_progress",
-          checked_in_at: now,
-          started_at: now,
-        },
+        updateFields,
         {
           new: true,
           runValidators: true,
@@ -426,7 +469,7 @@ export const checkInAssignment = async (assignmentId, workerId, qrToken) => {
   }
 };
 
-export const checkOutAssignment = async (assignmentId, workerId, qrToken) => {
+export const checkOutAssignment = async (assignmentId, workerId, qrToken, location = null) => {
   const session = await mongoose.startSession();
 
   try {
@@ -475,6 +518,23 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken) => {
         session,
       });
 
+      const now = new Date();
+      const workedMs = now - new Date(assignment.checked_in_at);
+      const workedHours = Math.round((workedMs / 3600000) * 100) / 100;
+
+      const updateFields = {
+        checked_out_at: now,
+        worked_hours: workedHours,
+        attendance_status: "checked_out",
+      };
+
+      if (location && location.lat != null && location.lng != null) {
+        updateFields.check_out_location = {
+          lat: location.lat,
+          lng: location.lng,
+        };
+      }
+
       const updatedAssignment = await JobAssignment.findOneAndUpdate(
         {
           _id: assignmentId,
@@ -482,9 +542,7 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken) => {
           status: "in_progress",
           checked_out_at: null,
         },
-        {
-          checked_out_at: new Date(),
-        },
+        updateFields,
         {
           new: true,
           runValidators: true,
@@ -526,4 +584,114 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken) => {
   } finally {
     session.endSession();
   }
+};
+
+const SAFE_REPORT_JOB_FIELDS = "title category location status start_date end_date salary";
+const SAFE_REPORT_WORKER_FIELDS = "name role profile_image bio";
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 100;
+
+const buildPagination = (query = {}) => {
+  const page = Math.max(Number(query.page) || DEFAULT_PAGE, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+const createPaginationMeta = ({ page, limit }, total) => ({
+  page,
+  limit,
+  total,
+  totalPages: Math.max(1, Math.ceil(total / limit)),
+});
+
+export const getEmployerAttendanceReport = async (employerId, query = {}) => {
+  const { page, limit, skip } = buildPagination(query);
+  const filter = { employer: employerId };
+
+  if (query.jobId) filter.job = query.jobId;
+  if (query.status) {
+    if (query.status === "checked-in") filter.attendance_status = "checked_in";
+    else if (query.status === "checked-out") filter.attendance_status = "checked_out";
+    else if (query.status === "no-show") filter.status = "cancelled";
+  }
+  if (query.workerName) {
+    const workers = await mongoose.model("User").find(
+      { name: { $regex: query.workerName, $options: "i" } },
+      "_id"
+    );
+    filter.worker = { $in: workers.map((w) => w._id) };
+  }
+  if (query.fromDate || query.toDate) {
+    filter.checked_in_at = {};
+    if (query.fromDate) filter.checked_in_at.$gte = new Date(query.fromDate);
+    if (query.toDate) filter.checked_in_at.$lte = new Date(query.toDate);
+  }
+
+  const [assignments, total] = await Promise.all([
+    JobAssignment.find(filter)
+      .sort({ checked_in_at: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("job", SAFE_REPORT_JOB_FIELDS)
+      .populate("worker", SAFE_REPORT_WORKER_FIELDS)
+      .select("-__v -attendance_token_generation_locks")
+      .lean(),
+    JobAssignment.countDocuments(filter),
+  ]);
+
+  return {
+    data: assignments,
+    pagination: createPaginationMeta({ page, limit }, total),
+  };
+};
+
+export const getAdminAttendanceAnalytics = async (query = {}) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const [totalAssignments, todayCheckIns, activeShifts, avgStats] = await Promise.all([
+    JobAssignment.countDocuments({}),
+    JobAssignment.countDocuments({ checked_in_at: { $gte: today } }),
+    JobAssignment.countDocuments({ status: "in_progress", checked_in_at: { $ne: null }, checked_out_at: null }),
+    JobAssignment.aggregate([
+      { $match: { worked_hours: { $ne: null } } },
+      { $group: { _id: null, avgHours: { $avg: "$worked_hours" }, totalHours: { $sum: "$worked_hours" } } },
+    ]),
+  ]);
+
+  let filter = {};
+  if (query.fromDate || query.toDate) {
+    filter.checked_in_at = {};
+    if (query.fromDate) filter.checked_in_at.$gte = new Date(query.fromDate);
+    if (query.toDate) filter.checked_in_at.$lte = new Date(query.toDate);
+  }
+
+  const pagination = buildPagination(query);
+  const { page, limit, skip } = pagination;
+
+  const [records, recordsTotal] = await Promise.all([
+    JobAssignment.find(filter)
+      .sort({ checked_in_at: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("job", SAFE_REPORT_JOB_FIELDS)
+      .populate("worker", SAFE_REPORT_WORKER_FIELDS)
+      .populate("employer", "name email")
+      .select("-__v -attendance_token_generation_locks")
+      .lean(),
+    JobAssignment.countDocuments(filter),
+  ]);
+
+  return {
+    analytics: {
+      totalAssignments,
+      todayCheckIns,
+      activeShifts,
+      avgWorkedHours: avgStats.length > 0 ? Math.round(avgStats[0].avgHours * 100) / 100 : 0,
+      totalWorkedHours: avgStats.length > 0 ? Math.round(avgStats[0].totalHours * 100) / 100 : 0,
+    },
+    data: records,
+    pagination: createPaginationMeta(pagination, recordsTotal),
+  };
 };

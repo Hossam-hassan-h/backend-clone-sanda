@@ -32,7 +32,8 @@ export const checkInAssignment = catchError(async (req, res) => {
   const assignment = await attendanceService.checkInAssignment(
     req.params.id,
     req.user.userId,
-    req.body.qrToken
+    req.body.qrToken,
+    req.body.location
   );
 
   res.status(200).json({
@@ -45,11 +46,33 @@ export const checkOutAssignment = catchError(async (req, res) => {
   const assignment = await attendanceService.checkOutAssignment(
     req.params.id,
     req.user.userId,
-    req.body.qrToken
+    req.body.qrToken,
+    req.body.location
   );
 
   res.status(200).json({
     status: statusText.SUCCESS,
     data: assignment,
+  });
+});
+
+export const getEmployerAttendanceReport = catchError(async (req, res) => {
+  const result = await attendanceService.getEmployerAttendanceReport(
+    req.user.userId,
+    req.query
+  );
+
+  res.status(200).json({
+    status: statusText.SUCCESS,
+    ...result,
+  });
+});
+
+export const getAdminAttendanceAnalytics = catchError(async (req, res) => {
+  const result = await attendanceService.getAdminAttendanceAnalytics(req.query);
+
+  res.status(200).json({
+    status: statusText.SUCCESS,
+    ...result,
   });
 });

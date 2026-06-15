@@ -76,6 +76,23 @@ const jobAssignmentSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    worked_hours: {
+      type: Number,
+      default: null,
+    },
+    attendance_status: {
+      type: String,
+      enum: ["none", "checked_in", "checked_out"],
+      default: "none",
+    },
+    check_in_location: {
+      lat: { type: Number, default: null },
+      lng: { type: Number, default: null },
+    },
+    check_out_location: {
+      lat: { type: Number, default: null },
+      lng: { type: Number, default: null },
+    },
     attendance_token_generation_locks: {
       type: attendanceTokenGenerationLocksSchema,
       default: () => ({}),
