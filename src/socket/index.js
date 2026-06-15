@@ -5,7 +5,7 @@ import { setSocketServer } from "./emitters.js";
 export const initializeSocket = (httpServer) => {
   const io = new Server(httpServer, {
     cors: {
-      origin: ["http://localhost:8080", "http://127.0.0.1:8080"],
+      origin: ["http://localhost:8080", "http://127.0.0.1:8080",'https://sanda-ten.vercel.app'],
       credentials: true,
     },
   });

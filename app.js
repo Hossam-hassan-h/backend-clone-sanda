@@ -15,7 +15,6 @@ import paymentRoutes from './src/models/payments/payment.routes.js';
 import { stripeWebhook } from './src/models/payments/payment.controller.js';
 import walletRoutes from './src/models/wallets/wallet.routes.js';
 import statusText from "./src/utils/statusText.js";
-import mongoSanitize from "express-mongo-sanitize";
 import noSqlSanitizer from './src/middlewares/sanitize.js';
 import { AppError } from './src/middlewares/appError.js';
 
