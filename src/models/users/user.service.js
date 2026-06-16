@@ -251,90 +251,59 @@ export const uploadDocuments = async (userId, files) => {
   const user = await User.findById(userId);
 
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError("User not found", 404, statusText.FAIL);
   }
 
-  if (!user.nationalId) {
-    user.nationalId = {};
+  const uploadedFiles = [];
+  const oldPublicIds = [];
+  const incomingFiles = files || {};
+  const hasAnyUpload = Object.values(incomingFiles).some((fileList) => fileList?.[0]);
+  const hasVerificationDocument =
+    !!incomingFiles.nationalIdFront?.[0] ||
+    !!incomingFiles.nationalIdBack?.[0] ||
+    !!incomingFiles.verificationSelfie?.[0];
+  const uploadPlan = [
+    { field: "profileImage", folder: "users/profile", path: "profile_image" },
+    { field: "nationalIdFront", folder: "users/national-id/front", path: "nationalId.front" },
+    { field: "nationalIdBack", folder: "users/national-id/back", path: "nationalId.back" },
+    { field: "verificationSelfie", folder: "users/verification-selfie", path: "verificationSelfie" },
+  ];
+
+  if (!hasAnyUpload) {
+    throw new AppError("No upload files received", 400, statusText.FAIL);
   }
 
- 
-  if (files.profileImage?.[0]) {
-    if (user.profile_image?.publicId) {
-      await cloudinary.uploader.destroy(
-        user.profile_image.publicId
-      );
+  try {
+    for (const item of uploadPlan) {
+      const file = incomingFiles[item.field]?.[0];
+      if (!file) continue;
+
+      const uploaded = await uploadToCloudinary(file.buffer, item.folder);
+      const nextValue = {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+      };
+
+      uploadedFiles.push(uploaded.public_id);
+      const previousValue = user.get(item.path);
+      if (previousValue?.publicId) oldPublicIds.push(previousValue.publicId);
+      user.set(item.path, nextValue);
     }
 
-    const uploaded = await uploadToCloudinary(
-      files.profileImage[0].buffer,
-      "users/profile"
-    );
-
-    user.profile_image = {
-      url: uploaded.secure_url,
-      publicId: uploaded.public_id,
-    };
-  }
-
- 
-  if (files.nationalIdFront?.[0]) {
-    if (user.nationalId?.front?.publicId) {
-      await cloudinary.uploader.destroy(
-        user.nationalId.front.publicId
-      );
+    if (hasVerificationDocument) {
+      user.verification_status = "pending";
     }
-
-    const uploaded = await uploadToCloudinary(
-      files.nationalIdFront[0].buffer,
-      "users/national-id/front"
+    await user.save();
+  } catch (error) {
+    await Promise.allSettled(uploadedFiles.map((publicId) => cloudinary.uploader.destroy(publicId)));
+    throw new AppError(
+      "Failed to upload verification documents",
+      502,
+      statusText.FAIL
     );
-
-    user.nationalId.front = {
-      url: uploaded.secure_url,
-      publicId: uploaded.public_id,
-    };
   }
 
-
-  if (files.nationalIdBack?.[0]) {
-    if (user.nationalId?.back?.publicId) {
-      await cloudinary.uploader.destroy(
-        user.nationalId.back.publicId
-      );
-    }
-
-    const uploaded = await uploadToCloudinary(
-      files.nationalIdBack[0].buffer,
-      "users/national-id/back"
-    );
-
-    user.nationalId.back = {
-      url: uploaded.secure_url,
-      publicId: uploaded.public_id,
-    };
-  }
-
-  if (files.verificationSelfie?.[0]) {
-    if (user.verificationSelfie?.publicId) {
-      await cloudinary.uploader.destroy(
-        user.verificationSelfie.publicId
-      );
-    }
-
-    const uploaded = await uploadToCloudinary(
-      files.verificationSelfie[0].buffer,
-      "users/verification-selfie"
-    );
-
-    user.verificationSelfie = {
-      url: uploaded.secure_url,
-      publicId: uploaded.public_id,
-    };
-  }
-
-  user.verification_status = "pending";
-  await user.save();
+  await Promise.allSettled(oldPublicIds.map((publicId) => cloudinary.uploader.destroy(publicId)));
 
   try {
     const admins = await User.find({ role: "admin", is_active: true }).select("_id");

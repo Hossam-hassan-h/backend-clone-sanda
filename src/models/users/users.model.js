@@ -169,7 +169,7 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.virtual("avatar").get(function () {
-  return this.profile_image?.url || null;
+  return this.profile_image?.url || "https://res.cloudinary.com/dqivqj7bs/image/upload/q_auto/f_auto/v1781603127/Screenshot_2026-06-16_124207_rgx7jv.png";
 });
 
 export default mongoose.model("User", userSchema);

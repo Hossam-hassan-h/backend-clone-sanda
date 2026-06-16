@@ -6,6 +6,11 @@ export const uploadToCloudinary = (
   folder
 ) => {
   return new Promise((resolve, reject) => {
+    if (!buffer) {
+      reject(new Error("Missing upload file buffer"));
+      return;
+    }
+
     const stream = cloudinary.uploader.upload_stream(
       {
         folder,
@@ -21,6 +26,7 @@ export const uploadToCloudinary = (
 
     streamifier
       .createReadStream(buffer)
+      .on("error", reject)
       .pipe(stream);
   });
 };
