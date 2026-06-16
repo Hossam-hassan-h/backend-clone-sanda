@@ -99,6 +99,7 @@ export const register = async (userData) => {
     await user.save();
     emailOtpRateLimitStore.set(normalizedEmail, user.emailOtpLastSentAt.getTime());
   } catch (error) {
+    console.error(`[SMTP_FAILURE] register: ${error.message}`);
     await User.findByIdAndDelete(user._id);
     throw new AppError(
       "Email service failed to send verification code",
@@ -140,6 +141,7 @@ export const resendEmailOtp = async (email) => {
     await sendVerificationEmail(user.email, otp);
     emailOtpRateLimitStore.set(normalizedEmail, sentAt.getTime());
   } catch (error) {
+    console.error(`[SMTP_FAILURE] resendEmailOtp: ${error.message}`);
     user.emailOtp = null;
     user.emailOtpExpire = null;
     user.emailOtpLastSentAt = null;

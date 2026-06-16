@@ -211,6 +211,7 @@ export const forgotPassword = async (email) => {
       ].join("")
     );
   } catch (error) {
+    console.error(`[SMTP_FAILURE] forgotPassword: ${error.message}`);
     await User.findByIdAndUpdate(user._id, {
       $set: {
         passwordResetOtp: null,

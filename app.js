@@ -35,6 +35,7 @@ const allowedOrigins = [
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    console.error(`[CORS_FAILURE] rejected origin=${origin}`);
     callback(new AppError("Not allowed by CORS", 403, statusText.FAIL));
   },
   credentials: true,
@@ -64,6 +65,9 @@ app.use((req, res, next) => {
 });
 
 app.use((err, req, res, next) => {
+  const isDbError = ["CastError", "ValidationError", "MongoServerError", "MongooseError"].includes(err.name);
+  const tag = isDbError ? "[DB_FAILURE]" : err.statusCode ? "[HANDLED_ERROR]" : "[UNHANDLED_ERROR]";
+  console.error(`${tag} ${req.method} ${req.originalUrl} - ${err.message}`);
   res.status(err.statusCode || 500).json({
     status: err.statusText || statusText.ERROR,
     message: err.message || "Internal Server Error"

@@ -18,10 +18,17 @@ export const sendEmail = async (to, subject, html) => {
     throw new Error("Email service is not configured");
   }
 
-  await transporter.sendMail({
-    from: process.env.EMAIL,
-    to,
-    subject,
-    html,
-  });
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL,
+      to,
+      subject,
+      html,
+    });
+  } catch (error) {
+    console.error(
+      `[SMTP_FAILURE] code=${error.code || "unknown"} command=${error.command || "n/a"} message=${error.message}`
+    );
+    throw error;
+  }
 };
