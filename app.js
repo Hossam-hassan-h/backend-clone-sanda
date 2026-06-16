@@ -27,6 +27,7 @@ const allowedOrigins = [
   "http://127.0.0.1:8080",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "https://sanda-rn9sx2u2z-hossam-hassan-hs-projects.vercel.app",
   "https://sanda-ten.vercel.app",
   ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []),
 ].map((origin) => origin.trim()).filter(Boolean);
