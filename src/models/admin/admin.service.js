@@ -1,5 +1,6 @@
 import User from "../users/users.model.js";
 import Job from "../jobs/job.model.js";
+import JobAssignment from "../jobAssignments/jobAssignment.model.js";
 import Conversation from "../conversations/conversation.model.js";
 import Message from "../messages/message.model.js";
 import Report from "../reports/report.model.js";
@@ -260,6 +261,20 @@ export const updateJob = async (jobId, updateData) => {
 export const deleteJob = async (jobId) => {
   const job = await Job.findById(jobId);
   if (!job) throw new AppError("Job not found", 404, statusText.FAIL);
+
+  // Prevent deletion if the job has assignments that are still assigned/accepted
+  // or in progress — workers actively committed to the job must not be orphaned.
+  const activeAssignmentExists = await JobAssignment.exists({
+    job: jobId,
+    status: { $in: ["assigned", "in_progress"] },
+  });
+  if (activeAssignmentExists) {
+    throw new AppError(
+      "Cannot delete job with assigned workers",
+      400,
+      statusText.FAIL
+    );
+  }
 
   // Prevent deletion if the job has associated payments (hold/release transactions)
   const paymentExists = await Transaction.exists({

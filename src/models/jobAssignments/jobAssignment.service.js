@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import JobAssignment from "./jobAssignment.model.js";
 import Job from "../jobs/job.model.js";
+import Application from "../applications/application.model.js";
 import { releaseToWorker } from "../payments/escrow.service.js";
 import {
   createNotification,
@@ -263,8 +264,8 @@ export const completeAssignment = async (assignmentId, employerId) => {
         recipient: precheckAssignment.worker,
         actor: employerId,
         type: "assignment_completed",
-        title: "Assignment completed",
-        message: "Your assignment has been marked as completed.",
+        title: "تم إكمال المهمة",
+        message: "تم تحديد مهمتك كمكتملة.",
         entityType: "job_assignment",
         entityId: precheckAssignment._id,
         job: precheckAssignment.job._id,
@@ -329,18 +330,82 @@ export const markNoShow = async (assignmentId, employerId) => {
     );
   }
 
-  const updated = await JobAssignment.findOneAndUpdate(
-    {
-      _id: assignmentId,
-      employer: employerId,
-      status: "assigned",
-    },
-    { status: "cancelled" },
-    { new: true, runValidators: true }
-  );
+  const session = await mongoose.startSession();
+  let updated;
 
-  if (!updated) {
-    throw new AppError("Failed to mark assignment as no-show", 400, statusText.FAIL);
+  try {
+    await session.withTransaction(async () => {
+      updated = await JobAssignment.findOneAndUpdate(
+        {
+          _id: assignmentId,
+          employer: employerId,
+          status: "assigned",
+        },
+        { status: "cancelled" },
+        { new: true, runValidators: true, session }
+      );
+
+      if (!updated) {
+        throw new AppError("Failed to mark assignment as no-show", 400, statusText.FAIL);
+      }
+
+      const capacityRelease = await Job.findOneAndUpdate(
+        {
+          _id: assignment.job._id,
+          accepted_workers_count: { $gt: 0 },
+        },
+        { $inc: { accepted_workers_count: -1 } },
+        { new: true, session }
+      );
+
+      if (capacityRelease) {
+        const shouldReopen =
+          capacityRelease.accepted_workers_count < capacityRelease.required_workers &&
+          capacityRelease.status === "in_progress";
+
+        if (shouldReopen) {
+          await Job.findOneAndUpdate(
+            { _id: capacityRelease._id, status: "in_progress" },
+            { status: "open" },
+            { session }
+          );
+
+          const eligibleWorkerIds = (
+            await Application.find({
+              job: capacityRelease._id,
+              status: { $in: ["pending", "rejected"] },
+            })
+              .distinct("worker")
+              .session(session)
+          ).filter(
+            (workerId) => workerId.toString() !== assignment.worker.toString()
+          );
+
+          for (const workerId of eligibleWorkerIds) {
+            await createNotification({
+              recipient: workerId,
+              actor: employerId,
+              type: "job_reopened",
+              title: "وظيفة متاحة من جديد",
+              message: `تم فتح فرصة عمل جديدة في وظيفة "${capacityRelease.title}" بعد تسجيل غياب أحد العمال`,
+              entityType: "job_assignment",
+              entityId: assignment._id,
+              job: capacityRelease._id,
+              deduplicationKey: `job_reopened:${assignment._id}:${workerId}`,
+              session,
+            });
+          }
+        }
+      }
+    });
+  } catch (error) {
+    if (isUnexpectedDuplicateKeyError(error)) {
+      throw createNotificationPersistenceError();
+    }
+
+    throw error;
+  } finally {
+    session.endSession();
   }
 
   const resAssignment = await JobAssignment.findById(updated._id)

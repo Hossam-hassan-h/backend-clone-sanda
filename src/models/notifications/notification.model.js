@@ -16,6 +16,7 @@ export const NOTIFICATION_TYPES = [
   "PAYMENT_FAILED",
   "PAYMENT_RELEASED",
   "REFUND_SUCCESS",
+  "job_reopened",
 ];
 
 const notificationSchema = new mongoose.Schema(
