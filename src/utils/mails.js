@@ -1,11 +1,16 @@
 import nodemailer from "nodemailer";
 
+const MAIL_TIMEOUT_MS = Number(process.env.MAIL_TIMEOUT_MS || 15000);
+
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: MAIL_TIMEOUT_MS,
+  greetingTimeout: MAIL_TIMEOUT_MS,
+  socketTimeout: MAIL_TIMEOUT_MS,
 });
 
 export const sendEmail = async (to, subject, html) => {
