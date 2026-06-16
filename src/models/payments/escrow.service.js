@@ -1,4 +1,4 @@
-﻿import mongoose from "mongoose";
+import mongoose from "mongoose";
 import JobAssignment from "../jobAssignments/jobAssignment.model.js";
 import Payment from "./payment.model.js";
 import Wallet from "../wallets/wallet.model.js";
@@ -32,6 +32,80 @@ const assertAssignmentExists = (assignment) => {
   if (!assignment) throw new AppError("Assignment not found", 404, statusText.FAIL);
 };
 
+export const executeReleasePayment = async (assignment, payment, session, actorId = null) => {
+  await ensureWallet(payment.worker, session);
+  await ensurePlatformLedger(session);
+
+  const walletUpdate = await Wallet.updateOne(
+    { user: payment.worker, pending_balance: { $gte: payment.job_amount } },
+    {
+      $inc: {
+        pending_balance: -payment.job_amount,
+        available_balance: payment.job_amount,
+      },
+    },
+    { session }
+  );
+
+  if (walletUpdate.modifiedCount !== 1) {
+    throw new AppError("Insufficient pending balance", 409, statusText.FAIL);
+  }
+
+  const platformUpdate = await PlatformLedger.updateOne(
+    { key: "platform", escrow_balance: { $gte: payment.total_amount } },
+    {
+      $inc: {
+        escrow_balance: -payment.total_amount,
+        fee_revenue: payment.platform_fee,
+      },
+    },
+    { session }
+  );
+
+  if (platformUpdate.modifiedCount !== 1) {
+    throw new AppError("Insufficient escrow balance", 409, statusText.FAIL);
+  }
+
+  await recordTransaction({
+    walletUser: payment.worker,
+    job: payment.job,
+    payment: payment._id,
+    assignment: assignment._id,
+    type: "RELEASE_TO_WORKER",
+    amount: payment.job_amount,
+    description: "Escrow released to worker wallet.",
+    idempotencyKey: `RELEASE_TO_WORKER:${payment._id}`,
+    session,
+  });
+
+  await recordTransaction({
+    walletUser: payment.employer,
+    job: payment.job,
+    payment: payment._id,
+    assignment: assignment._id,
+    type: "PLATFORM_FEE_COLLECTED",
+    amount: payment.platform_fee,
+    description: "Platform fee collected after assignment completion.",
+    idempotencyKey: `PLATFORM_FEE_COLLECTED:${payment._id}`,
+    session,
+  });
+
+  for (const recipient of [payment.employer, payment.worker]) {
+    await createNotification({
+      recipient,
+      actor: actorId || payment.employer,
+      type: "PAYMENT_RELEASED",
+      title: "Payment released",
+      message: "The assignment payment has been released.",
+      entityType: "job_assignment",
+      entityId: assignment._id,
+      job: payment.job,
+      deduplicationKey: `payment_released:${payment._id}:${recipient}`,
+      session,
+    });
+  }
+};
+
 export const releaseToWorker = async (assignmentId, employerId) => {
   const session = await mongoose.startSession();
   let updatedId = null;
@@ -62,82 +136,15 @@ export const releaseToWorker = async (assignmentId, employerId) => {
         throw new AppError("Payment is not held in escrow", 400, statusText.FAIL);
       }
 
-      await ensureWallet(payment.worker, session);
-      await ensurePlatformLedger(session);
-
-      const walletUpdate = await Wallet.updateOne(
-        { user: payment.worker, pending_balance: { $gte: payment.job_amount } },
-        {
-          $inc: {
-            pending_balance: -payment.job_amount,
-            available_balance: payment.job_amount,
-          },
-        },
-        { session }
-      );
-
-      if (walletUpdate.modifiedCount !== 1) {
-        throw new AppError("Insufficient pending balance", 409, statusText.FAIL);
-      }
-
-      const platformUpdate = await PlatformLedger.updateOne(
-        { key: "platform", escrow_balance: { $gte: payment.total_amount } },
-        {
-          $inc: {
-            escrow_balance: -payment.total_amount,
-            fee_revenue: payment.platform_fee,
-          },
-        },
-        { session }
-      );
-
-      if (platformUpdate.modifiedCount !== 1) {
-        throw new AppError("Insufficient escrow balance", 409, statusText.FAIL);
-      }
+      await executeReleasePayment(assignment, payment, session, employerId);
 
       assignment.status = "completed";
       assignment.marketplace_status = "RELEASED";
       assignment.completed_at = new Date();
-      await assignment.save({ session });
-
-      await recordTransaction({
-        walletUser: payment.worker,
-        job: payment.job,
-        payment: payment._id,
-        assignment: assignment._id,
-        type: "RELEASE_TO_WORKER",
-        amount: payment.job_amount,
-        description: "Escrow released to worker wallet.",
-        idempotencyKey: `RELEASE_TO_WORKER:${payment._id}`,
-        session,
-      });
-
-      await recordTransaction({
-        walletUser: payment.employer,
-        job: payment.job,
-        payment: payment._id,
-        assignment: assignment._id,
-        type: "PLATFORM_FEE_COLLECTED",
-        amount: payment.platform_fee,
-        description: "Platform fee collected after assignment completion.",
-        idempotencyKey: `PLATFORM_FEE_COLLECTED:${payment._id}`,
-        session,
-      });
-
-      for (const recipient of [payment.employer, payment.worker]) {
-        await createNotification({
-          recipient,
-          actor: employerId,
-          type: "PAYMENT_RELEASED",
-          title: "Payment released",
-          message: "The assignment payment has been released.",
-          entityType: "job_assignment",
-          entityId: assignment._id,
-          job: payment.job,
-          deduplicationKey: `payment_released:${payment._id}:${recipient}`,
-          session,
-        });
+      if (!assignment.checked_out_at) {
+        assignment.checked_out_at = new Date();
       }
+      await assignment.save({ session });
 
       updatedId = assignment._id;
     });

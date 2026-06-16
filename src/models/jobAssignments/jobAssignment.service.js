@@ -19,6 +19,26 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
 
+export const addDynamicRefundState = (assignment) => {
+  if (!assignment) return assignment;
+  const obj = typeof assignment.toObject === "function" ? assignment.toObject() : assignment;
+
+  if (
+    obj.checked_in_at &&
+    !obj.checked_out_at &&
+    obj.status !== "completed" &&
+    obj.marketplace_status === "FUNDS_HELD"
+  ) {
+    const checkInTime = new Date(obj.checked_in_at).getTime();
+    const thirtyMinutes = 30 * 60 * 1000;
+    if (Date.now() - checkInTime <= thirtyMinutes) {
+      obj.marketplace_status = "REFUND_WINDOW_ACTIVE";
+      obj.refund_deadline = new Date(checkInTime + thirtyMinutes).toISOString();
+    }
+  }
+  return obj;
+};
+
 const buildPagination = (query = {}) => {
   const page = Math.max(Number(query.page) || DEFAULT_PAGE, 1);
   const limit = Math.min(
@@ -124,7 +144,7 @@ export const getMyAssignments = async (workerId, query = {}) => {
   ]);
 
   return {
-    assignments,
+    assignments: assignments.map(addDynamicRefundState),
     pagination: createPaginationMeta(pagination, total),
   };
 };
@@ -172,12 +192,13 @@ export const startAssignment = async (assignmentId, workerId) => {
     );
   }
 
-  return await JobAssignment.findById(updatedAssignment._id)
+  const resAssignment = await JobAssignment.findById(updatedAssignment._id)
     .populate("job", SAFE_JOB_FIELDS)
     .populate("worker", SAFE_WORKER_FIELDS)
     .populate("employer", SAFE_EMPLOYER_FIELDS)
     .select("-__v")
     .lean();
+  return addDynamicRefundState(resAssignment);
 };
 
 export const completeAssignment = async (assignmentId, employerId) => {
@@ -252,12 +273,13 @@ export const completeAssignment = async (assignmentId, employerId) => {
       });
     });
 
-    return await JobAssignment.findById(updatedAssignmentId)
+    const resAssignment = await JobAssignment.findById(updatedAssignmentId)
       .populate("job", SAFE_JOB_FIELDS)
       .populate("worker", SAFE_WORKER_FIELDS)
       .populate("employer", SAFE_EMPLOYER_FIELDS)
       .select("-__v")
       .lean();
+    return addDynamicRefundState(resAssignment);
   } catch (error) {
     if (isUnexpectedDuplicateKeyError(error)) {
       throw createNotificationPersistenceError();
@@ -268,6 +290,7 @@ export const completeAssignment = async (assignmentId, employerId) => {
     session.endSession();
   }
 };
+
 export const getAssignmentById = async (assignmentId, userId) => {
   const assignment = await JobAssignment.findById(assignmentId)
     .populate("job", SAFE_JOB_FIELDS)
@@ -285,7 +308,7 @@ export const getAssignmentById = async (assignmentId, userId) => {
     throw new AppError("You are not allowed to access this assignment", 403, statusText.FAIL);
   }
 
-  return assignment;
+  return addDynamicRefundState(assignment);
 };
 
 export const markNoShow = async (assignmentId, employerId) => {
@@ -320,12 +343,13 @@ export const markNoShow = async (assignmentId, employerId) => {
     throw new AppError("Failed to mark assignment as no-show", 400, statusText.FAIL);
   }
 
-  return await JobAssignment.findById(updated._id)
+  const resAssignment = await JobAssignment.findById(updated._id)
     .populate("job", SAFE_JOB_FIELDS)
     .populate("worker", SAFE_WORKER_FIELDS)
     .populate("employer", SAFE_EMPLOYER_FIELDS)
     .select("-__v")
     .lean();
+  return addDynamicRefundState(resAssignment);
 };
 
 export const getJobAssignments = async (jobId, employerId, query = {}) => {
@@ -349,7 +373,7 @@ export const getJobAssignments = async (jobId, employerId, query = {}) => {
   ]);
 
   return {
-    assignments,
+    assignments: assignments.map(addDynamicRefundState),
     pagination: createPaginationMeta(pagination, total),
   };
 };

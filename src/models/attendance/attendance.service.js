@@ -2,6 +2,8 @@ import crypto from "crypto";
 import mongoose from "mongoose";
 import AttendanceToken from "./attendanceToken.model.js";
 import JobAssignment from "../jobAssignments/jobAssignment.model.js";
+import Payment from "../payments/payment.model.js";
+import { executeReleasePayment } from "../payments/escrow.service.js";
 import {
   createNotification,
   createNotificationPersistenceError,
@@ -94,7 +96,7 @@ const getPopulatedAssignment = async (assignmentId, session = null) => {
   const query = JobAssignment.findById(assignmentId)
     .populate("job", "_id owner status")
     .select(
-      "_id job worker employer status checked_in_at checked_out_at started_at completed_at check_in_location check_out_location"
+      "_id job worker employer status checked_in_at checked_out_at started_at completed_at check_in_location check_out_location payment marketplace_status"
     );
 
   if (session) {
@@ -128,9 +130,31 @@ const getWorkedHours = (assignment) => {
   );
 };
 
+const getDynamicRefundState = (assignment) => {
+  let marketplaceStatus = assignment.marketplace_status;
+  let refundDeadline = null;
+
+  if (
+    assignment.checked_in_at &&
+    !assignment.checked_out_at &&
+    assignment.status !== "completed" &&
+    assignment.marketplace_status === "FUNDS_HELD"
+  ) {
+    const checkInTime = new Date(assignment.checked_in_at).getTime();
+    const thirtyMinutes = 30 * 60 * 1000;
+    if (Date.now() - checkInTime <= thirtyMinutes) {
+      marketplaceStatus = "REFUND_WINDOW_ACTIVE";
+      refundDeadline = new Date(checkInTime + thirtyMinutes).toISOString();
+    }
+  }
+
+  return { marketplaceStatus, refundDeadline };
+};
+
 const serializeAttendanceAssignment = (assignment) => {
   const job = assignment.job || {};
   const worker = assignment.worker || {};
+  const { marketplaceStatus, refundDeadline } = getDynamicRefundState(assignment);
   return {
     id: assignment._id?.toString(),
     jobId: job._id?.toString() || assignment.job?.toString(),
@@ -155,7 +179,8 @@ const serializeAttendanceAssignment = (assignment) => {
     checkedInAt: assignment.checked_in_at,
     checkedOutAt: assignment.checked_out_at,
     completedAt: assignment.completed_at,
-    marketplaceStatus: assignment.marketplace_status,
+    refundDeadline: refundDeadline || assignment.refund_deadline || null,
+    marketplaceStatus,
     payment: assignment.payment,
     attendanceStatus: getAttendanceStatus(assignment),
     workedHours: getWorkedHours(assignment),
@@ -646,7 +671,12 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken, locati
         session,
       });
 
-      const update = { checked_out_at: new Date() };
+      const now = new Date();
+      const update = {
+        checked_out_at: now,
+        status: "completed",
+        completed_at: now,
+      };
       const safeLocation = normalizeLocation(location);
       if (safeLocation) update.check_out_location = safeLocation;
 
@@ -673,6 +703,22 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken, locati
         );
       }
 
+      if (updatedAssignment.payment) {
+        const payment = await Payment.findOneAndUpdate(
+          { _id: updatedAssignment.payment, status: "FUNDS_HELD" },
+          { status: "RELEASED", released_at: now },
+          { new: true, runValidators: true, session }
+        );
+
+        if (!payment) {
+          throw new AppError("Payment is not held in escrow", 400, statusText.FAIL);
+        }
+
+        await executeReleasePayment(updatedAssignment, payment, session, workerId);
+        updatedAssignment.marketplace_status = "RELEASED";
+        await updatedAssignment.save({ session });
+      }
+
       updatedAssignmentId = updatedAssignment._id;
 
       await createNotification({
@@ -685,6 +731,19 @@ export const checkOutAssignment = async (assignmentId, workerId, qrToken, locati
         entityId: assignment._id,
         job: assignment.job._id,
         deduplicationKey: `check_out:${assignment._id}`,
+        session,
+      });
+
+      await createNotification({
+        recipient: assignment.worker,
+        actor: workerId,
+        type: "assignment_completed",
+        title: "Assignment completed",
+        message: "Your assignment has been marked as completed.",
+        entityType: "job_assignment",
+        entityId: assignment._id,
+        job: assignment.job._id,
+        deduplicationKey: `assignment_completed:${assignment._id}`,
         session,
       });
     });

@@ -1,4 +1,4 @@
-﻿import mongoose from "mongoose";
+import mongoose from "mongoose";
 import JobAssignment from "../jobAssignments/jobAssignment.model.js";
 import Payment from "./payment.model.js";
 import Wallet from "../wallets/wallet.model.js";
@@ -129,12 +129,22 @@ export const processRefund = async ({ paymentIntentId, refundId = null, requeste
 
 export const requestRefund = async (assignmentId, employerId) => {
   const assignment = await JobAssignment.findById(assignmentId).select(
-    "_id employer marketplace_status payment status"
+    "_id employer marketplace_status payment status checked_in_at"
   );
   assertAssignmentExists(assignment);
 
   if (assignment.employer.toString() !== employerId) {
     throw new AppError("You are not allowed to refund this assignment", 403, statusText.FAIL);
+  }
+
+  if (!assignment.checked_in_at) {
+    throw new AppError("Refund is only allowed after the worker has checked in", 400, statusText.FAIL);
+  }
+
+  const checkInTime = new Date(assignment.checked_in_at).getTime();
+  const thirtyMinutes = 30 * 60 * 1000;
+  if (Date.now() - checkInTime > thirtyMinutes) {
+    throw new AppError("Refund request window has expired (30 minutes from check-in)", 400, statusText.FAIL);
   }
 
   if (assignment.status === "completed" || assignment.marketplace_status === "RELEASED") {
