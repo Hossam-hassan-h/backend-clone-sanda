@@ -74,14 +74,10 @@ export const register = async (userData) => {
   const existingUser = await User.findOne({ email: normalizedEmail }).select("+emailOtpLastSentAt");
 
   if (existingUser) {
-    if (!existingUser.confirmedMail) {
-      return await resendEmailOtp(normalizedEmail);
-    }
     throw new AppError("Email already in use", 409, statusText.FAIL);
   }
 
   const hashedPassword = await hashPassword(userData.password);
-  const { otp, hashedOtp, expiresAt } = buildEmailOtp();
 
   const user = await User.create({
     ...userData,
@@ -89,29 +85,13 @@ export const register = async (userData) => {
     password: hashedPassword,
     is_active: true,
     isBlocked: false,
-    confirmedMail: false,
-    emailOtp: hashedOtp,
-    emailOtpExpire: expiresAt,
+    confirmedMail: true,
   });
 
-  try {
-    await sendVerificationEmail(user.email, otp);
-    user.emailOtpLastSentAt = new Date();
-    await user.save();
-    emailOtpRateLimitStore.set(normalizedEmail, user.emailOtpLastSentAt.getTime());
-  } catch (error) {
-    console.error(`[SMTP_FAILURE] register: ${error.message}`);
-    await User.findByIdAndDelete(user._id);
-    throw new AppError(
-      "Email service failed to send verification code",
-      502,
-      statusText.FAIL
-    );
-  }
-
   return {
-    message: "OTP sent to email",
+    message: "Registration successful",
     userId: user._id,
+    email: user.email,
   };
 };
 

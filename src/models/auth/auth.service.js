@@ -50,10 +50,6 @@ export const login = async (email, password) => {
   if (!isPasswordValid) {
     throw new AppError("Invalid password", 401, statusText.FAIL);
   }
-  if (user.role !== "admin" && user.confirmedMail === false) {
-    throw new AppError("Please verify your email before logging in.", 403, statusText.FAIL);
-  }
-
   if (isAccountBlocked(user)) {
     throw new AppError("Your account is blocked. Please contact support.", 403, statusText.FAIL);
   }
