@@ -1,3 +1,4 @@
+
 import User from "./users.model.js";
 import RefreshToken from "../auth/refreshToken.model.js";
 import { hashPassword, comparePassword } from "../../utils/bcrypt.js";
@@ -309,6 +310,24 @@ export const uploadDocuments = async (userId, files) => {
     );
 
     user.nationalId.back = {
+      url: uploaded.secure_url,
+      publicId: uploaded.public_id,
+    };
+  }
+
+  if (files.verificationSelfie?.[0]) {
+    if (user.verificationSelfie?.publicId) {
+      await cloudinary.uploader.destroy(
+        user.verificationSelfie.publicId
+      );
+    }
+
+    const uploaded = await uploadToCloudinary(
+      files.verificationSelfie[0].buffer,
+      "users/verification-selfie"
+    );
+
+    user.verificationSelfie = {
       url: uploaded.secure_url,
       publicId: uploaded.public_id,
     };

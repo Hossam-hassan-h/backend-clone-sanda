@@ -22,4 +22,5 @@ export const uploadUserDocuments = upload.fields([
   { name: "profileImage", maxCount: 1 },
   { name: "nationalIdFront", maxCount: 1 },
   { name: "nationalIdBack", maxCount: 1 },
+  { name: "verificationSelfie", maxCount: 1 },
 ]);

@@ -71,6 +71,17 @@ const userSchema = new mongoose.Schema(
   },
 },
 
+  verificationSelfie: {
+    url: {
+      type: String,
+      default: null,
+    },
+    publicId: {
+      type: String,
+      default: null,
+    },
+  },
+
     is_active: {
       type: Boolean,
       default: true,
@@ -152,7 +163,13 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+userSchema.virtual("avatar").get(function () {
+  return this.profile_image?.url || null;
+});
 
 export default mongoose.model("User", userSchema);
