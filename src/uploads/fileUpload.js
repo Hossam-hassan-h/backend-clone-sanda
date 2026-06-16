@@ -23,9 +23,21 @@ const upload = multer({
 
 const userDocumentFields = upload.fields([
   { name: "profileImage", maxCount: 1 },
+  { name: "profile_image", maxCount: 1 },
+  { name: "avatar", maxCount: 1 },
   { name: "nationalIdFront", maxCount: 1 },
+  { name: "national_id_front", maxCount: 1 },
+  { name: "nationalId.front", maxCount: 1 },
+  { name: "nationalId[front]", maxCount: 1 },
   { name: "nationalIdBack", maxCount: 1 },
+  { name: "national_id_back", maxCount: 1 },
+  { name: "nationalId.back", maxCount: 1 },
+  { name: "nationalId[back]", maxCount: 1 },
   { name: "verificationSelfie", maxCount: 1 },
+  { name: "verification_selfie", maxCount: 1 },
+  { name: "personalPhoto", maxCount: 1 },
+  { name: "personal_photo", maxCount: 1 },
+  { name: "selfie", maxCount: 1 },
 ]);
 
 export const uploadUserDocuments = (req, res, next) => {

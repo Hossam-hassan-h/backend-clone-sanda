@@ -258,15 +258,22 @@ export const uploadDocuments = async (userId, files) => {
   const oldPublicIds = [];
   const incomingFiles = files || {};
   const hasAnyUpload = Object.values(incomingFiles).some((fileList) => fileList?.[0]);
+  const getUploadedFile = (fields) => {
+    for (const field of fields) {
+      const file = incomingFiles[field]?.[0];
+      if (file) return file;
+    }
+    return null;
+  };
   const hasVerificationDocument =
-    !!incomingFiles.nationalIdFront?.[0] ||
-    !!incomingFiles.nationalIdBack?.[0] ||
-    !!incomingFiles.verificationSelfie?.[0];
+    !!getUploadedFile(["nationalIdFront", "national_id_front", "nationalId.front", "nationalId[front]"]) ||
+    !!getUploadedFile(["nationalIdBack", "national_id_back", "nationalId.back", "nationalId[back]"]) ||
+    !!getUploadedFile(["verificationSelfie", "verification_selfie", "personalPhoto", "personal_photo", "selfie"]);
   const uploadPlan = [
-    { field: "profileImage", folder: "users/profile", path: "profile_image" },
-    { field: "nationalIdFront", folder: "users/national-id/front", path: "nationalId.front" },
-    { field: "nationalIdBack", folder: "users/national-id/back", path: "nationalId.back" },
-    { field: "verificationSelfie", folder: "users/verification-selfie", path: "verificationSelfie" },
+    { fields: ["profileImage", "profile_image", "avatar"], folder: "users/profile", path: "profile_image" },
+    { fields: ["nationalIdFront", "national_id_front", "nationalId.front", "nationalId[front]"], folder: "users/national-id/front", path: "nationalId.front" },
+    { fields: ["nationalIdBack", "national_id_back", "nationalId.back", "nationalId[back]"], folder: "users/national-id/back", path: "nationalId.back" },
+    { fields: ["verificationSelfie", "verification_selfie", "personalPhoto", "personal_photo", "selfie"], folder: "users/verification-selfie", path: "verificationSelfie" },
   ];
 
   if (!hasAnyUpload) {
@@ -275,7 +282,7 @@ export const uploadDocuments = async (userId, files) => {
 
   try {
     for (const item of uploadPlan) {
-      const file = incomingFiles[item.field]?.[0];
+      const file = getUploadedFile(item.fields);
       if (!file) continue;
 
       const uploaded = await uploadToCloudinary(file.buffer, item.folder);
