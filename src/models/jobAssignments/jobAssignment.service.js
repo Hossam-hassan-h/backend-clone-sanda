@@ -11,34 +11,21 @@ import {
 import { AppError } from "../../middlewares/appError.js";
 import statusText from "../../utils/statusText.js";
 
+/* =========================
+   SAFE POPULATE FIELDS
+========================= */
+
 const SAFE_WORKER_FIELDS = "name role profile_image bio";
 const SAFE_EMPLOYER_FIELDS = "name role profile_image bio";
-const SAFE_JOB_FIELDS =
-  "title category location status start_date end_date salary";
-const ACTIVE_JOB_STATUSES = ["open", "in_progress"];
+const SAFE_JOB_FIELDS = "title category location status";
+
+/* =========================
+   PAGINATION
+========================= */
+
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
-
-export const addDynamicRefundState = (assignment) => {
-  if (!assignment) return assignment;
-  const obj = typeof assignment.toObject === "function" ? assignment.toObject() : assignment;
-
-  if (
-    obj.checked_in_at &&
-    !obj.checked_out_at &&
-    obj.status !== "completed" &&
-    obj.marketplace_status === "FUNDS_HELD"
-  ) {
-    const checkInTime = new Date(obj.checked_in_at).getTime();
-    const thirtyMinutes = 30 * 60 * 1000;
-    if (Date.now() - checkInTime <= thirtyMinutes) {
-      obj.marketplace_status = "REFUND_WINDOW_ACTIVE";
-      obj.refund_deadline = new Date(checkInTime + thirtyMinutes).toISOString();
-    }
-  }
-  return obj;
-};
 
 const buildPagination = (query = {}) => {
   const page = Math.max(Number(query.page) || DEFAULT_PAGE, 1);
@@ -54,83 +41,47 @@ const buildPagination = (query = {}) => {
   };
 };
 
-const createPaginationMeta = ({ page, limit }, total) => ({
-  page,
-  limit,
-  total,
-  totalPages: Math.max(1, Math.ceil(total / limit)),
-});
+/* =========================
+   REFUND WINDOW (FROM SCHEMA)
+========================= */
 
-const applyStatusFilter = (filter, query = {}) => {
-  if (query.status) filter.status = query.status;
-  return filter;
-};
+export const addDynamicRefundState = (assignment) => {
+  if (!assignment) return assignment;
 
-const assertJobExists = (job) => {
-  if (!job) {
-    throw new AppError("Job not found", 404, statusText.FAIL);
+  const obj =
+    typeof assignment.toObject === "function"
+      ? assignment.toObject()
+      : assignment;
+
+  const attendance = obj.attendance || {};
+
+  if (
+    attendance.checked_in_at &&
+    !attendance.checked_out_at &&
+    obj.status === "in_progress" &&
+    obj.marketplace_status === "FUNDS_HELD"
+  ) {
+    const checkInTime = new Date(attendance.checked_in_at).getTime();
+    const windowMs = 30 * 60 * 1000;
+
+    if (Date.now() - checkInTime <= windowMs) {
+      obj.marketplace_status = "REFUND_WINDOW_ACTIVE";
+      obj.refund_deadline = new Date(checkInTime + windowMs);
+    }
   }
+
+  return obj;
 };
 
-const assertJobOwner = (job, employerId) => {
-  if (job.owner.toString() !== employerId) {
-    throw new AppError(
-      "You are not allowed to access assignments for this job",
-      403,
-      statusText.FAIL
-    );
-  }
-};
-
-const assertAssignmentExists = (assignment) => {
-  if (!assignment) {
-    throw new AppError("Assignment not found", 404, statusText.FAIL);
-  }
-};
-
-const assertWorkerOwnsAssignment = (assignment, workerId) => {
-  if (assignment.worker.toString() !== workerId) {
-    throw new AppError(
-      "You are not allowed to start this assignment",
-      403,
-      statusText.FAIL
-    );
-  }
-};
-
-const assertEmployerOwnsAssignment = (assignment, employerId) => {
-  if (assignment.employer.toString() !== employerId) {
-    throw new AppError(
-      "You are not allowed to complete this assignment",
-      403,
-      statusText.FAIL
-    );
-  }
-};
-
-const assertStartJobStatus = (job) => {
-  if (!ACTIVE_JOB_STATUSES.includes(job.status)) {
-    throw new AppError(
-      "Job status does not allow assignment start",
-      400,
-      statusText.FAIL
-    );
-  }
-};
-
-const assertCompletionJobStatus = (job) => {
-  if (!ACTIVE_JOB_STATUSES.includes(job.status)) {
-    throw new AppError(
-      "Job status does not allow assignment completion",
-      400,
-      statusText.FAIL
-    );
-  }
-};
+/* =========================
+   GET ASSIGNMENTS (WORKER)
+========================= */
 
 export const getMyAssignments = async (workerId, query = {}) => {
   const pagination = buildPagination(query);
-  const filter = applyStatusFilter({ worker: workerId }, query);
+
+  const filter = { worker: workerId };
+  if (query.status) filter.status = query.status;
 
   const [assignments, total] = await Promise.all([
     JobAssignment.find(filter)
@@ -139,37 +90,44 @@ export const getMyAssignments = async (workerId, query = {}) => {
       .limit(pagination.limit)
       .populate("job", SAFE_JOB_FIELDS)
       .populate("employer", SAFE_EMPLOYER_FIELDS)
-      .select("-__v")
+      .populate("worker", SAFE_WORKER_FIELDS)
       .lean(),
+
     JobAssignment.countDocuments(filter),
   ]);
 
   return {
     assignments: assignments.map(addDynamicRefundState),
-    pagination: createPaginationMeta(pagination, total),
+    pagination: {
+      page: pagination.page,
+      limit: pagination.limit,
+      total,
+      totalPages: Math.ceil(total / pagination.limit),
+    },
   };
 };
 
+/* =========================
+   CHECK IN (START)
+========================= */
+
 export const startAssignment = async (assignmentId, workerId) => {
-  const assignment = await JobAssignment.findById(assignmentId)
-    .select("_id job worker status")
-    .populate("job", "_id status");
+  const assignment = await JobAssignment.findById(assignmentId).populate(
+    "job",
+    "_id status"
+  );
 
-  assertAssignmentExists(assignment);
-  assertJobExists(assignment.job);
-  assertWorkerOwnsAssignment(assignment, workerId);
+  if (!assignment) throw new AppError("Assignment not found", 404);
 
-  if (assignment.status !== "assigned") {
-    throw new AppError(
-      "Assignment is not in assigned status",
-      400,
-      statusText.FAIL
-    );
+  if (assignment.worker.toString() !== workerId) {
+    throw new AppError("Not allowed", 403);
   }
 
-  assertStartJobStatus(assignment.job);
+  if (assignment.status !== "assigned") {
+    throw new AppError("Already started", 400);
+  }
 
-  const updatedAssignment = await JobAssignment.findOneAndUpdate(
+  const updated = await JobAssignment.findOneAndUpdate(
     {
       _id: assignmentId,
       worker: workerId,
@@ -177,191 +135,162 @@ export const startAssignment = async (assignmentId, workerId) => {
     },
     {
       status: "in_progress",
-      started_at: new Date(),
+      "attendance.checked_in_at": new Date(),
     },
-    {
-      new: true,
-      runValidators: true,
-    }
-  );
-
-  if (!updatedAssignment) {
-    throw new AppError(
-      "Assignment is not in assigned status",
-      400,
-      statusText.FAIL
-    );
-  }
-
-  const resAssignment = await JobAssignment.findById(updatedAssignment._id)
+    { new: true }
+  )
     .populate("job", SAFE_JOB_FIELDS)
     .populate("worker", SAFE_WORKER_FIELDS)
-    .populate("employer", SAFE_EMPLOYER_FIELDS)
-    .select("-__v")
     .lean();
-  return addDynamicRefundState(resAssignment);
+
+  return addDynamicRefundState(updated);
 };
 
+/* =========================
+   CHECK OUT (COMPLETE)
+========================= */
+
 export const completeAssignment = async (assignmentId, employerId) => {
-  const precheckAssignment = await JobAssignment.findById(assignmentId)
-    .select("_id job worker employer status payment")
-    .populate("job", "_id owner status");
+  const assignment = await JobAssignment.findById(assignmentId).populate(
+    "job",
+    "_id owner status"
+  );
 
-  assertAssignmentExists(precheckAssignment);
-  assertJobExists(precheckAssignment.job);
-  assertEmployerOwnsAssignment(precheckAssignment, employerId);
-  assertJobOwner(precheckAssignment.job, employerId);
+  if (!assignment) throw new AppError("Assignment not found", 404);
 
-  if (precheckAssignment.status !== "in_progress") {
-    throw new AppError(
-      "Assignment is not in progress",
-      400,
-      statusText.FAIL
-    );
+  if (assignment.employer.toString() !== employerId) {
+    throw new AppError("Not allowed", 403);
   }
 
-  assertCompletionJobStatus(precheckAssignment.job);
+  if (assignment.status !== "in_progress") {
+    throw new AppError("Not in progress", 400);
+  }
 
-  if (precheckAssignment.payment) {
+  if (assignment.payment) {
     return await releaseToWorker(assignmentId, employerId);
   }
 
-  const session = await mongoose.startSession();
+  const updated = await JobAssignment.findOneAndUpdate(
+    {
+      _id: assignmentId,
+      employer: employerId,
+      status: "in_progress",
+    },
+    {
+      status: "completed",
+      "attendance.checked_out_at": new Date(),
+    },
+    { new: true }
+  )
+    .populate("job", SAFE_JOB_FIELDS)
+    .populate("worker", SAFE_WORKER_FIELDS)
+    .lean();
 
-  try {
-    let updatedAssignmentId;
+  return addDynamicRefundState(updated);
+};
 
-    await session.withTransaction(async () => {
-      const updatedAssignment = await JobAssignment.findOneAndUpdate(
-        {
-          _id: assignmentId,
-          employer: employerId,
-          status: "in_progress",
-          payment: null,
-        },
-        {
-          status: "completed",
-          completed_at: new Date(),
-        },
-        {
-          new: true,
-          runValidators: true,
-          session,
-        }
-      );
+/* =========================
+   NO SHOW (IMPORTANT FIX)
+========================= */
 
-      if (!updatedAssignment) {
-        throw new AppError(
-          "Assignment is not in progress",
-          400,
-          statusText.FAIL
-        );
-      }
+export const markNoShow = async (assignmentId, employerId) => {
+  const assignment = await JobAssignment.findById(assignmentId).populate(
+    "job",
+    "_id owner status"
+  );
 
-      updatedAssignmentId = updatedAssignment._id;
+  if (!assignment) throw new AppError("Assignment not found", 404);
 
-      await createNotification({
-        recipient: precheckAssignment.worker,
-        actor: employerId,
-        type: "assignment_completed",
-        title: "تم إكمال المهمة",
-        message: "تم تحديد مهمتك كمكتملة.",
-        entityType: "job_assignment",
-        entityId: precheckAssignment._id,
-        job: precheckAssignment.job._id,
-        deduplicationKey: `assignment_completed:${precheckAssignment._id}`,
-        session,
-      });
-    });
+  if (assignment.employer.toString() !== employerId) {
+    throw new AppError("Not allowed", 403);
+  }
 
-    const resAssignment = await JobAssignment.findById(updatedAssignmentId)
-      .populate("job", SAFE_JOB_FIELDS)
+  if (assignment.status !== "assigned") {
+    throw new AppError("Only assigned can be marked no-show", 400);
+  }
+
+  const updated = await JobAssignment.findOneAndUpdate(
+    {
+      _id: assignmentId,
+      employer: employerId,
+      status: "assigned",
+    },
+    {
+      status: "cancelled",
+      "attendance.no_show": true,
+    },
+    { new: true }
+  )
+    .populate("job", SAFE_JOB_FIELDS)
+    .populate("worker", SAFE_WORKER_FIELDS)
+    .lean();
+
+  return addDynamicRefundState(updated);
+};
+
+/* =========================
+   GET JOB ASSIGNMENTS (EMPLOYER)
+========================= */
+
+export const getJobAssignments = async (jobId, employerId, query = {}) => {
+  const job = await Job.findById(jobId);
+
+  if (!job) throw new AppError("Job not found", 404);
+
+  if (job.owner.toString() !== employerId) {
+    throw new AppError("Not allowed", 403);
+  }
+
+  const pagination = buildPagination(query);
+
+  const filter = { job: jobId };
+  if (query.status) filter.status = query.status;
+
+  const [assignments, total] = await Promise.all([
+    JobAssignment.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(pagination.skip)
+      .limit(pagination.limit)
       .populate("worker", SAFE_WORKER_FIELDS)
       .populate("employer", SAFE_EMPLOYER_FIELDS)
-      .select("-__v")
-      .lean();
-    return addDynamicRefundState(resAssignment);
-  } catch (error) {
-    if (isUnexpectedDuplicateKeyError(error)) {
-      throw createNotificationPersistenceError();
-    }
+      .lean(),
 
-    throw error;
-  } finally {
-    session.endSession();
-  }
+    JobAssignment.countDocuments(filter),
+  ]);
+
+  return {
+    assignments: assignments.map(addDynamicRefundState),
+    pagination: {
+      page: pagination.page,
+      limit: pagination.limit,
+      total,
+      totalPages: Math.ceil(total / pagination.limit),
+    },
+  };
 };
+
+/* =========================
+   GET BY ID (SECURE)
+========================= */
 
 export const getAssignmentById = async (assignmentId, userId) => {
   const assignment = await JobAssignment.findById(assignmentId)
     .populate("job", SAFE_JOB_FIELDS)
     .populate("worker", SAFE_WORKER_FIELDS)
     .populate("employer", SAFE_EMPLOYER_FIELDS)
-    .select("-__v -attendance_token_generation_locks")
     .lean();
 
-  assertAssignmentExists(assignment);
+  if (!assignment) throw new AppError("Not found", 404);
 
   const isWorker = assignment.worker._id.toString() === userId;
   const isEmployer = assignment.employer._id.toString() === userId;
 
   if (!isWorker && !isEmployer) {
-    throw new AppError("You are not allowed to access this assignment", 403, statusText.FAIL);
+    throw new AppError("Forbidden", 403);
   }
 
   return addDynamicRefundState(assignment);
-};
-
-export const markNoShow = async (assignmentId, employerId) => {
-  const assignment = await JobAssignment.findById(assignmentId)
-    .select("_id job worker employer status")
-    .populate("job", "_id owner status");
-
-  assertAssignmentExists(assignment);
-  assertJobExists(assignment.job);
-  assertEmployerOwnsAssignment(assignment, employerId);
-  assertJobOwner(assignment.job, employerId);
-
-  if (assignment.status !== "assigned") {
-    throw new AppError(
-      "Only assigned assignments can be marked as no-show",
-      400,
-      statusText.FAIL
-    );
-  }
-
-  const session = await mongoose.startSession();
-  let updated;
-
-  try {
-    await session.withTransaction(async () => {
-      updated = await JobAssignment.findOneAndUpdate(
-        {
-          _id: assignmentId,
-          employer: employerId,
-          status: "assigned",
-        },
-        { status: "cancelled" },
-        { new: true, runValidators: true, session }
-      );
-
-      if (!updated) {
-        throw new AppError("Failed to mark assignment as no-show", 400, statusText.FAIL);
-      }
-
-      const capacityRelease = await Job.findOneAndUpdate(
-        {
-          _id: assignment.job._id,
-          accepted_workers_count: { $gt: 0 },
-        },
-        { $inc: { accepted_workers_count: -1 } },
-        { new: true, session }
-      );
-
-      if (capacityRelease) {
-        const shouldReopen =
-          capacityRelease.accepted_workers_count < capacityRelease.required_workers &&
-          capacityRelease.status === "in_progress";
+};  capacityRelease.status === "in_progress";
 
         if (shouldReopen) {
           await Job.findOneAndUpdate(
