@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 import JobAssignment from "./jobAssignment.model.js";
 import Job from "../jobs/job.model.js";
@@ -270,7 +269,7 @@ export const completeAssignment = async (assignmentId, employerId) => {
         entityType: "job_assignment",
         entityId: precheckAssignment._id,
         job: precheckAssignment.job._id,
-        deduplicationKey: assignment_completed:${precheckAssignment._id},
+        deduplicationKey: `assignment_completed:${precheckAssignment._id}`,
         session,
       });
     });
@@ -388,11 +387,11 @@ export const markNoShow = async (assignmentId, employerId) => {
               actor: employerId,
               type: "job_reopened",
               title: "وظيفة متاحة من جديد",
-              message: تم فتح فرصة عمل جديدة في وظيفة "${capacityRelease.title}" بعد تسجيل غياب أحد العمال,
+              message: `تم فتح فرصة عمل جديدة في وظيفة "${capacityRelease.title}" بعد تسجيل غياب أحد العمال`,
               entityType: "job_assignment",
               entityId: assignment._id,
               job: capacityRelease._id,
-              deduplicationKey: job_reopened:${assignment._id}:${workerId},
+              deduplicationKey: `job_reopened:${assignment._id}:${workerId}`,
               session,
             });
           }
@@ -441,4 +440,5 @@ export const getJobAssignments = async (jobId, employerId, query = {}) => {
   return {
     assignments: assignments.map(addDynamicRefundState),
     pagination: createPaginationMeta(pagination, total),
-  };;
+  };
+};
