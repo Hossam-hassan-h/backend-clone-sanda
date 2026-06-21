@@ -99,6 +99,6 @@ jobAssignmentSchema.index({ job: 1, worker: 1 }, { unique: true });
 jobAssignmentSchema.index({ worker: 1, createdAt: -1 });
 jobAssignmentSchema.index({ employer: 1, createdAt: -1 });
 jobAssignmentSchema.index({ job: 1, status: 1 });
-jobAssignmentSchema.index({ marketpla دا مودل اهو بتاع الباك كدا بياخد من الاستاستوس عالطول ؟ce_status: 1, createdAt: -1 });
+jobAssignmentSchema.index({ marketplace_status: 1, createdAt: -1 });
 
 export default mongoose.model("JobAssignment", jobAssignmentSchema);
