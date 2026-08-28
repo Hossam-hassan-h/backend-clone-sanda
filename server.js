@@ -4,7 +4,7 @@ import app from "./app.js";
 import { connectDB } from "./src/models/db.js";
 import { initializeSocket } from "./src/socket/index.js";
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5100;
 
 const server = http.createServer(app);
 
